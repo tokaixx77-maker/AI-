@@ -18,21 +18,22 @@ except ImportError:
     st.stop()
 
 # ==========================================
-# 📚 核心配置
+# 📚 核心配置与别名映射 (解决痛点二的基础)
 # ==========================================
+# 这里定义了标准名称和常见的别名，系统会自动匹配
 SCORE_COLUMNS_MAP = {
-    '50米': ['50米', '50米跑', '五十米'],
-    '立定跳远': ['立定跳远', '跳远'],
-    '坐位体前屈': ['坐位体前屈', '体前屈', '坐位'],
-    '1000米': ['1000米', '1000米跑', '一千米'],
-    '800米': ['800米', '800米跑', '八百米'],
-    '引体向上': ['引体向上', '引体'],
-    '仰卧起坐': ['仰卧起坐', '一分钟仰卧起坐'],
-    '肺活量': ['肺活量'],
-    '身高': ['身高'],
-    '体重': ['体重'],
-    '跳绳': ['跳绳', '一分钟跳绳'],
-    '50x8往返跑': ['50x8', '50米x8', '往返跑']
+    '50米': ['50米', '50米跑', '五十米', '男生50米', '女生50米', '50m'],
+    '立定跳远': ['立定跳远', '跳远', '立定跳远(厘米)', '立定跳远(cm)'],
+    '坐位体前屈': ['坐位体前屈', '体前屈', '坐位', '坐位体前屈(厘米)', '坐位体前屈(cm)'],
+    '1000米': ['1000米', '1000米跑', '一千米', '男生1000米', '1000m'],
+    '800米': ['800米', '800米跑', '八百米', '女生800米', '800m'],
+    '引体向上': ['引体向上', '引体', '男生引体向上'],
+    '仰卧起坐': ['仰卧起坐', '一分钟仰卧起坐', '女生仰卧起坐'],
+    '肺活量': ['肺活量', '肺活量(毫升)', '肺活量(ml)'],
+    '身高': ['身高', '身高(厘米)', '身高(cm)'],
+    '体重': ['体重', '体重(千克)', '体重(kg)'],
+    '跳绳': ['跳绳', '一分钟跳绳', '跳绳(次)'],
+    '50x8往返跑': ['50x8', '50米x8', '往返跑', '50*8']
 }
 
 DEFAULT_STANDARDS_DATA = {
@@ -179,7 +180,8 @@ def save_data_keeping_format(orig_file_bytes_io, processed_df):
         return out, "✅ 成功"
     except Exception as e: return None, f"导出失败: {str(e)}"
 
-def call_qwen_vl_ocr(img_file, api_key):
+# 【修改】增加 filename 参数，用于痛点三的溯源
+def call_qwen_vl_ocr(img_file, api_key, filename):
     dashscope.api_key = api_key
     prompt = "你是一个专业的体测数据录入员。请分析这张体测成绩单图片。任务：提取表格中的姓名、性别、班级，以及所有体育项目的成绩。重要规则：1. **姓名必须极其准确**，这是匹配的关键。2. 如果有“立定跳远”项目，且单位是“米”（例如 2.3），请务必转换为“厘米”（例如 230）。3. 最终输出必须是一个纯粹的 JSON 格式列表（List of Dicts），不要包含任何Markdown标记（如 ```json ... ```）或其他解释文字。例如：[{\"姓名\": \"张三\", \"性别\": \"男\", \"50米\": \"7.5\", \"立定跳远\": \"230\"}, ...]"
     local_path = None
@@ -191,7 +193,12 @@ def call_qwen_vl_ocr(img_file, api_key):
         resp = dashscope.MultiModalConversation.call(model='qwen-vl-max', messages=messages)
         os.remove(local_path)
         if resp.status_code == HTTPStatus.OK:
-            return resp.output.choices[0].message.content[0]['text'].replace("```json", "").replace("```", "").strip()
+            content = resp.output.choices[0].message.content[0]['text'].replace("```json", "").replace("```", "").strip()
+            data = json.loads(content)
+            # 【新增】将来源文件名注入到每一条数据中
+            if isinstance(data, list):
+                for item in data: item['来源图片'] = filename
+            return data
         else: return f"Error: API 返回状态码 {resp.code} - {resp.message}"
     except Exception as e:
         if local_path and os.path.exists(local_path): os.remove(local_path)
@@ -215,11 +222,12 @@ def merge_ocr_to_master(master_df, ocr_df):
                 target_idx = merged_df[mask].index[0]
                 updated_items = []
                 for col in row.index:
-                    if col in SCORE_COLUMNS_MAP and col in merged_df.columns and pd.notna(row[col]):
+                    # 排除掉 '来源图片' 列，不合并它
+                    if col != '来源图片' and col in SCORE_COLUMNS_MAP and col in merged_df.columns and pd.notna(row[col]):
                         old_val = merged_df.at[target_idx, col]
                         merged_df.at[target_idx, col] = row[col]
                         updated_items.append(col)
-                        changes.append({"姓名": name, "项目": col, "旧值": old_val if pd.notna(old_val) else "(空)", "新值": row[col]})
+                        changes.append({"姓名": name, "项目": col, "旧值": old_val if pd.notna(old_val) else "(空)", "新值": row[col], "来源图片": row.get('来源图片', '未知')})
                 if updated_items: logs.append(f"✅ {name}: 成功更新 {len(updated_items)} 个项目")
     return merged_df, logs, pd.DataFrame(changes)
 
