@@ -5,11 +5,11 @@ import os
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import utils as U
-# 【新增】引入绘图库 (解决痛点一)
+# 引入绘图库
 import plotly.figure_factory as ff
 
 # ==========================================
-# 🎨 UI 配置 (V12.0 Ultimate Pro Toolkit)
+# 🎨 UI 配置 (V12.1 Fix Refresh Issue)
 # ==========================================
 st.set_page_config(
     page_title="77 SYSTEM",
@@ -77,7 +77,7 @@ def render_ui_header():
 
     <div style="margin-bottom: 30px;">
         <h1 class='main-logo-text'>77 <span class='brand-blue'>SYSTEM</span></h1>
-        <p class='sub-title'>全学段体测数据智能中枢 // v12.0 Pro Toolkit</p>
+        <p class='sub-title'>全学段体测数据智能中枢 // v12.1 Pro Toolkit</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -87,11 +87,10 @@ def render_ui_header():
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# 📈 绘图函数 (解决痛点一)
+# 📈 绘图函数
 # ==========================================
 def render_distribution_chart(df_old, df_new):
     """绘制调整前后的成绩分布对比图"""
-    # 提取所有数值型体育项目列
     score_cols = [col for col in df_new.columns if any(k in col for k in U.SCORE_COLUMNS_MAP.keys())]
     if not score_cols: return None
     
@@ -103,9 +102,8 @@ def render_distribution_chart(df_old, df_new):
     if len(clean_old) > 0 and len(clean_new) > 0:
         hist_data = [clean_old, clean_new]
         group_labels = ['调整前 (原始)', '调整后 (优化)']
-        colors = ['#A0A0A0', '#0047FF'] # 灰色 vs 克莱因蓝
+        colors = ['#A0A0A0', '#0047FF']
         
-        # 创建分布图 (需要 scipy 库支持)
         try:
             fig = ff.create_distplot(hist_data, group_labels, show_hist=False, show_rug=False, colors=colors)
             fig.update_layout(
@@ -118,7 +116,7 @@ def render_distribution_chart(df_old, df_new):
             )
             return fig
         except Exception as e:
-            st.warning(f"无法绘制图表，可能数据量过少或缺少依赖库 (scipy)。错误: {e}")
+            st.warning(f"无法绘制图表 (数据量可能过少): {e}")
             return None
     return None
 
@@ -158,15 +156,22 @@ with st.sidebar:
 st.write("")
 with st.expander("📂 第一步：上传模版总表 (Excel)", expanded=True):
     mf = st.file_uploader("点击上传文件", type=['xlsx'], label_visibility="collapsed")
+    
+    # 1. 加载文件逻辑 (仅在新文件上传时执行)
     if mf and mf.name != st.session_state['m_name']:
         df = pd.read_excel(mf)
         st.session_state.update({'m_df': df, 'm_file_bytes': mf.getvalue(), 'm_name': mf.name})
         st.toast(f"✅ 已加载: {mf.name}")
+
+    # 2. 【修复关键点】显示报告逻辑 (移出上面的 if 块，只要有数据就一直显示)
+    if st.session_state['m_df'] is not None:
+        # 获取当前的 DataFrame
+        df_curr = st.session_state['m_df']
         
-        # 【新增】解决痛点二：智能表头识别报告
+        # 扫描列名
         identified_cols = []
         unidentified_cols = []
-        for col in df.columns:
+        for col in df_curr.columns:
             is_identified = False
             for std_name, aliases in U.SCORE_COLUMNS_MAP.items():
                 if col == std_name or col in aliases:
@@ -176,6 +181,7 @@ with st.expander("📂 第一步：上传模版总表 (Excel)", expanded=True):
             if not is_identified and col not in ['姓名', '性别', '班级', '学号']:
                 unidentified_cols.append(f"`{col}`")
         
+        # 始终显示的折叠报告
         with st.expander("🔎 智能表头识别报告 (点击查看)", expanded=False):
             if identified_cols:
                  st.success(f"✅ 成功识别以下体育项目列：\n\n" + ", ".join(identified_cols))
@@ -186,20 +192,18 @@ if st.session_state['m_df'] is not None:
     st.write("")
     t1, t2 = st.tabs(["📸 AI 识图 & 合并", "🚀 数据智能处理"])
 
-    # === Tab 1: AI 识图 (解决痛点三) ===
+    # === Tab 1: AI 识图 ===
     with t1:
         st.caption("💡 提示：支持批量上传多张图片。")
         c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
-        # 【新增】保存上传的图片对象，用于后续展示
         with c1: imgs = st.file_uploader("上传成绩单", type=['jpg','png','jpeg'], accept_multiple_files=True)
         with c2: start_ocr = st.button("✨ 开始识别", type="primary", use_container_width=True)
 
         if imgs:
-            # 【新增】图片库展示
             with st.expander("🖼️ 已上传图片库 (点击展开查看原图)", expanded=False):
-                cols = st.columns(len(imgs))
+                cols = st.columns(len(imgs)) if len(imgs) < 5 else st.columns(5)
                 for i, img_file in enumerate(imgs):
-                    with cols[i]:
+                    with cols[i % 5]: # 防止列数过多
                         st.image(img_file, caption=img_file.name, use_container_width=True)
 
         if start_ocr:
@@ -210,7 +214,6 @@ if st.session_state['m_df'] is not None:
                 prog_bar, status_text = st.progress(0), st.empty()
                 with st.spinner("🚀 正在分析图像..."):
                     with ThreadPoolExecutor(max_workers=5) as pool:
-                        # 【修改】传递 filename 给工具函数
                         futures = {pool.submit(U.call_qwen_vl_ocr, img, EFFECTIVE_KEY, img.name): img for img in imgs}
                         for i, f in enumerate(as_completed(futures)):
                             img_file = futures[f]
@@ -232,7 +235,6 @@ if st.session_state['m_df'] is not None:
 
         if st.session_state['ocr_df'] is not None:
             st.markdown("---")
-            # 【新增】提示用户最右侧有来源图片列
             st.caption("请核对下方识别结果 (最右侧列可查看数据来源图片)：")
             ed_ocr = st.data_editor(st.session_state['ocr_df'], num_rows="dynamic", use_container_width=True)
             if st.button("📥 确认合并到总表", type="primary", use_container_width=True):
@@ -285,7 +287,7 @@ if st.session_state['m_df'] is not None:
         if run_btn:
             if not U.STANDARDS_DB: st.error("❌ 标准库丢失")
             else:
-                # 【新增】保存旧数据快照用于对比
+                # 保存快照
                 df_old_snapshot = st.session_state['m_df'].copy()
                 
                 df_c, _ = U.smart_clean(st.session_state['m_df'], school_level)
@@ -306,13 +308,10 @@ if st.session_state['m_df'] is not None:
                     """, unsafe_allow_html=True)
                 
                 st.write("")
-                # 【新增】解决痛点一：数据分布可视化
                 with st.expander("📊 数据分布可视化分析 (点击查看专业图表)", expanded=True):
                     chart_fig = render_distribution_chart(df_old_snapshot, df_f)
-                    if chart_fig:
-                        st.plotly_chart(chart_fig, use_container_width=True)
-                    else:
-                        st.info("暂无足够数据生成对比图表，请确保表格中包含体育项目数据。")
+                    if chart_fig: st.plotly_chart(chart_fig, use_container_width=True)
+                    else: st.info("暂无足够数据生成对比图表 (请确保表格包含数值型体育项目)")
 
                 if not boost_logs.empty:
                     with st.expander(f"📋 查看调整明细 ({len(boost_logs)} 项)", expanded=False):
