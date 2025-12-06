@@ -5,11 +5,10 @@ import os
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import utils as U
-# 引入绘图库
 import plotly.figure_factory as ff
 
 # ==========================================
-# 🎨 UI 配置 (V12.1 Fix Refresh Issue)
+# 🎨 UI 配置 (V12.3 With Data Preview)
 # ==========================================
 st.set_page_config(
     page_title="77 SYSTEM",
@@ -19,7 +18,7 @@ st.set_page_config(
 )
 
 def render_ui_header():
-    """渲染自适应系统主题的 UI"""
+    """渲染 UI 样式"""
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
@@ -28,6 +27,7 @@ def render_ui_header():
         font-family: 'Inter', system-ui, -apple-system, "Microsoft YaHei", sans-serif;
     }
 
+    /* 容器样式 */
     .stTabs [data-baseweb="tab-panel"], [data-testid="stExpander"] {
         background-color: var(--secondary-background-color);
         border-radius: 16px; padding: 24px;
@@ -36,6 +36,7 @@ def render_ui_header():
     }
     [data-testid="stExpander"] { border: none; padding: 10px; }
 
+    /* 标题与Logo */
     .main-logo-text {
         font-family: 'Inter', sans-serif; font-size: 52px; font-weight: 900; letter-spacing: -1px;
         color: var(--text-color); margin: 0; line-height: 1.2;
@@ -46,6 +47,7 @@ def render_ui_header():
         font-family: "Microsoft YaHei", sans-serif;
     }
 
+    /* 按钮样式 */
     div.stButton > button[kind="primary"] {
         background-color: #0071e3; color: white !important;
         border: none; border-radius: 99px; padding: 12px 28px; font-weight: 600; transition: all 0.2s ease;
@@ -60,6 +62,7 @@ def render_ui_header():
     }
     div.stButton > button[kind="secondary"]:hover { opacity: 1.0; border-color: #0071e3; color: #0071e3; }
 
+    /* 进度条与卡片 */
     .progress-ring-circle { stroke: #0071e3; transition: stroke-dashoffset 1s ease; }
     .progress-ring-bg { stroke: var(--text-color); opacity: 0.1; }
     .progress-text-container { color: var(--text-color); }
@@ -77,7 +80,7 @@ def render_ui_header():
 
     <div style="margin-bottom: 30px;">
         <h1 class='main-logo-text'>77 <span class='brand-blue'>SYSTEM</span></h1>
-        <p class='sub-title'>全学段体测数据智能中枢 // v12.1 Pro Toolkit</p>
+        <p class='sub-title'>全学段体测数据智能中枢 // v12.3 Pro Toolkit</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -90,7 +93,6 @@ def render_ui_header():
 # 📈 绘图函数
 # ==========================================
 def render_distribution_chart(df_old, df_new):
-    """绘制调整前后的成绩分布对比图"""
     score_cols = [col for col in df_new.columns if any(k in col for k in U.SCORE_COLUMNS_MAP.keys())]
     if not score_cols: return None
     
@@ -103,7 +105,6 @@ def render_distribution_chart(df_old, df_new):
         hist_data = [clean_old, clean_new]
         group_labels = ['调整前 (原始)', '调整后 (优化)']
         colors = ['#A0A0A0', '#0047FF']
-        
         try:
             fig = ff.create_distplot(hist_data, group_labels, show_hist=False, show_rug=False, colors=colors)
             fig.update_layout(
@@ -115,9 +116,7 @@ def render_distribution_chart(df_old, df_new):
                 xaxis=dict(showgrid=False), yaxis=dict(showgrid=False)
             )
             return fig
-        except Exception as e:
-            st.warning(f"无法绘制图表 (数据量可能过少): {e}")
-            return None
+        except: return None
     return None
 
 # ==========================================
@@ -129,7 +128,8 @@ except: BACKEND_API_KEY = None
 if 'init' not in st.session_state:
     st.session_state.update({
         'init': True, 'm_file_bytes': None, 'm_name': '', 'm_df': None, 'ocr_df': None,
-        'target_rate_coarse': 90.0, 'school_level_index': 0
+        'target_rate_coarse': 90.0, 'school_level_index': 0,
+        'report_ready': False, 'identified_cols': [], 'unidentified_cols': []
     })
 
 render_ui_header()
@@ -154,24 +154,17 @@ with st.sidebar:
     st.session_state['school_level_index'] = ["初中", "高中", "大学", "小学(低年级)", "小学(中年级)", "小学(高年级)"].index(school_level)
 
 st.write("")
+# 1. 上传区域
 with st.expander("📂 第一步：上传模版总表 (Excel)", expanded=True):
     mf = st.file_uploader("点击上传文件", type=['xlsx'], label_visibility="collapsed")
     
-    # 1. 加载文件逻辑 (仅在新文件上传时执行)
     if mf and mf.name != st.session_state['m_name']:
         df = pd.read_excel(mf)
-        st.session_state.update({'m_df': df, 'm_file_bytes': mf.getvalue(), 'm_name': mf.name})
-        st.toast(f"✅ 已加载: {mf.name}")
-
-    # 2. 【修复关键点】显示报告逻辑 (移出上面的 if 块，只要有数据就一直显示)
-    if st.session_state['m_df'] is not None:
-        # 获取当前的 DataFrame
-        df_curr = st.session_state['m_df']
         
         # 扫描列名
         identified_cols = []
         unidentified_cols = []
-        for col in df_curr.columns:
+        for col in df.columns:
             is_identified = False
             for std_name, aliases in U.SCORE_COLUMNS_MAP.items():
                 if col == std_name or col in aliases:
@@ -181,13 +174,35 @@ with st.expander("📂 第一步：上传模版总表 (Excel)", expanded=True):
             if not is_identified and col not in ['姓名', '性别', '班级', '学号']:
                 unidentified_cols.append(f"`{col}`")
         
-        # 始终显示的折叠报告
-        with st.expander("🔎 智能表头识别报告 (点击查看)", expanded=False):
-            if identified_cols:
-                 st.success(f"✅ 成功识别以下体育项目列：\n\n" + ", ".join(identified_cols))
-            if unidentified_cols:
-                 st.info(f"ℹ️ 以下列未被识别为标准体育项目（将被忽略或仅作参考）：\n\n" + ", ".join(unidentified_cols) + "\n\n💡 提示：如果需要识别，请修改 Excel 表头为标准名称（如“50米”）。")
+        # 更新状态
+        st.session_state.update({
+            'm_df': df, 'm_file_bytes': mf.getvalue(), 'm_name': mf.name,
+            'report_ready': True, 
+            'identified_cols': identified_cols,
+            'unidentified_cols': unidentified_cols
+        })
+        st.toast(f"✅ 已加载: {mf.name}")
 
+# 【V12.3 新增】数据预览 + 识别报告
+if st.session_state.get('report_ready', False):
+    st.write("") 
+    with st.expander("🔎 智能表头识别报告 & 数据预览 (点击展开/收起)", expanded=True):
+        # 1. 数据预览部分
+        st.markdown("##### 📊 原始数据预览 (前 5 行)")
+        st.dataframe(st.session_state['m_df'].head(5), use_container_width=True)
+        st.markdown("---") # 分割线
+        
+        # 2. 识别报告部分
+        st.markdown("##### 🧠 字段识别分析")
+        i_cols = st.session_state['identified_cols']
+        u_cols = st.session_state['unidentified_cols']
+        
+        if i_cols:
+             st.success(f"✅ 成功识别以下体育项目列：\n\n" + ", ".join(i_cols))
+        if u_cols:
+             st.info(f"ℹ️ 以下列未被识别为标准体育项目（将被忽略）：\n\n" + ", ".join(u_cols) + "\n\n💡 提示：如需识别，请在 Excel 中修改为标准名称（如“50米”）。")
+
+# 2. 核心功能区
 if st.session_state['m_df'] is not None:
     st.write("")
     t1, t2 = st.tabs(["📸 AI 识图 & 合并", "🚀 数据智能处理"])
@@ -203,7 +218,7 @@ if st.session_state['m_df'] is not None:
             with st.expander("🖼️ 已上传图片库 (点击展开查看原图)", expanded=False):
                 cols = st.columns(len(imgs)) if len(imgs) < 5 else st.columns(5)
                 for i, img_file in enumerate(imgs):
-                    with cols[i % 5]: # 防止列数过多
+                    with cols[i % 5]:
                         st.image(img_file, caption=img_file.name, use_container_width=True)
 
         if start_ocr:
@@ -287,7 +302,6 @@ if st.session_state['m_df'] is not None:
         if run_btn:
             if not U.STANDARDS_DB: st.error("❌ 标准库丢失")
             else:
-                # 保存快照
                 df_old_snapshot = st.session_state['m_df'].copy()
                 
                 df_c, _ = U.smart_clean(st.session_state['m_df'], school_level)
