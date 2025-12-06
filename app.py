@@ -8,7 +8,7 @@ import utils as U
 import plotly.figure_factory as ff
 
 # ==========================================
-# 🎨 UI 配置
+# 🎨 UI 配置 (V13.1 Privacy Stealth Mode)
 # ==========================================
 st.set_page_config(
     page_title="77 SYSTEM",
@@ -18,6 +18,7 @@ st.set_page_config(
 )
 
 def render_ui_header():
+    """渲染 UI 样式 + 隐私隐藏代码"""
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
@@ -26,6 +27,7 @@ def render_ui_header():
         font-family: 'Inter', system-ui, -apple-system, "Microsoft YaHei", sans-serif;
     }
 
+    /* --- 核心容器样式 --- */
     .stTabs [data-baseweb="tab-panel"], [data-testid="stExpander"] {
         background-color: var(--secondary-background-color);
         border-radius: 16px; padding: 24px;
@@ -34,6 +36,7 @@ def render_ui_header():
     }
     [data-testid="stExpander"] { border: none; padding: 10px; }
 
+    /* --- 标题与Logo --- */
     .main-logo-text {
         font-family: 'Inter', sans-serif; font-size: 52px; font-weight: 900; letter-spacing: -1px;
         color: var(--text-color); margin: 0; line-height: 1.2;
@@ -44,6 +47,7 @@ def render_ui_header():
         font-family: "Microsoft YaHei", sans-serif;
     }
 
+    /* --- 按钮样式 --- */
     div.stButton > button[kind="primary"] {
         background-color: #0071e3; color: white !important;
         border: none; border-radius: 99px; padding: 12px 28px; font-weight: 600; transition: all 0.2s ease;
@@ -58,6 +62,7 @@ def render_ui_header():
     }
     div.stButton > button[kind="secondary"]:hover { opacity: 1.0; border-color: #0071e3; color: #0071e3; }
 
+    /* --- 进度条与卡片 --- */
     .progress-ring-circle { stroke: #0071e3; transition: stroke-dashoffset 1s ease; }
     .progress-ring-bg { stroke: var(--text-color); opacity: 0.1; }
     .progress-text-container { color: var(--text-color); }
@@ -69,13 +74,27 @@ def render_ui_header():
     }
     .metric-val { font-size: 40px; font-weight: 800; color: var(--text-color); }
     .metric-lbl { font-size: 13px; font-weight: 600; opacity: 0.6; text-transform: uppercase;}
+    
+    /* --- 页脚 --- */
+    .footer {
+        text-align: center; font-size: 12px; color: #888; margin-top: 50px; padding: 20px;
+        border-top: 1px solid rgba(128,128,128,0.1);
+    }
 
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
+    /* 🛡️🛡️🛡️ 【核心代码】彻底隐藏右上角菜单、Fork按钮、自带Header 🛡️🛡️🛡️ */
+    #MainMenu {visibility: hidden !important;}
+    header {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    [data-testid="stToolbar"] {visibility: hidden !important; display: none !important;}
+    [data-testid="stHeader"] {visibility: hidden !important; display: none !important;}
+    .stDeployButton {display:none !important;}
+    /* 🛡️🛡️🛡️ 结束 🛡️🛡️🛡️ */
+    
     </style>
 
     <div style="margin-bottom: 30px;">
         <h1 class='main-logo-text'>77 <span class='brand-blue'>SYSTEM</span></h1>
-        <p class='sub-title'>全学段体测数据智能中枢 // v13.2 Professional</p>
+        <p class='sub-title'>全学段体测数据智能中枢 // Professional Edition</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -157,8 +176,10 @@ with st.expander("📂 第一步：上传模版总表 (Excel)", expanded=True):
         sheet_names = xls.sheet_names
         st.session_state['sheet_names'] = sheet_names
         st.session_state['current_sheet'] = sheet_names[0]
+        # 默认读取第一个
         df = pd.read_excel(mf, sheet_name=sheet_names[0])
         
+        # 识别表头
         identified_cols = []
         unidentified_cols = []
         for col in df.columns:
@@ -178,6 +199,7 @@ with st.expander("📂 第一步：上传模版总表 (Excel)", expanded=True):
         })
         st.toast(f"✅ 已加载: {mf.name}")
 
+    # 多 Sheet 选择器
     if 'sheet_names' in st.session_state and len(st.session_state['sheet_names']) > 1:
         selected_sheet = st.selectbox("📑 检测到多个工作表，请选择班级：", st.session_state['sheet_names'], index=0)
         if selected_sheet != st.session_state['current_sheet']:
@@ -185,15 +207,15 @@ with st.expander("📂 第一步：上传模版总表 (Excel)", expanded=True):
             st.session_state.update({'m_df': df, 'current_sheet': selected_sheet, 'has_calculated': False})
             st.rerun()
 
+# 识别报告
 if st.session_state.get('report_ready', False):
     st.write("") 
-    with st.expander("🔎 智能表头识别报告 & 数据预览 (点击展开/收起)", expanded=True):
-        st.markdown("##### 📊 原始数据预览 (前 5 行)")
+    with st.expander("🔎 智能表头识别报告 & 数据预览 (点击展开)", expanded=True):
+        st.markdown("##### 📊 数据预览 (前 5 行)")
         st.dataframe(st.session_state['m_df'].head(5), use_container_width=True)
         st.markdown("---")
-        
         i_cols = st.session_state['identified_cols']
-        if i_cols: st.success(f"✅ 成功识别以下体育项目列：\n\n" + ", ".join(i_cols))
+        if i_cols: st.success(f"✅ 成功识别体育项目：\n\n" + ", ".join(i_cols))
         else: st.error("❌ 未识别到任何体育项目，请检查表头名称是否规范（如：50米，跳绳）。")
 
 # 2. 核心功能区
@@ -209,11 +231,10 @@ if st.session_state['m_df'] is not None:
         with c2: start_ocr = st.button("✨ 开始识别", type="primary", use_container_width=True)
 
         if imgs:
-            with st.expander("🖼️ 已上传图片库 (点击展开查看原图)", expanded=False):
-                cols = st.columns(len(imgs)) if len(imgs) < 5 else st.columns(5)
+            with st.expander("🖼️ 图片库 (点击展开)", expanded=False):
+                cols = st.columns(5)
                 for i, img_file in enumerate(imgs):
-                    with cols[i % 5]:
-                        st.image(img_file, caption=img_file.name, use_container_width=True)
+                    with cols[i % 5]: st.image(img_file, caption=img_file.name, use_container_width=True)
 
         if start_ocr:
             if not imgs: st.warning("⚠️ 请先上传图片")
@@ -244,24 +265,22 @@ if st.session_state['m_df'] is not None:
 
         if st.session_state['ocr_df'] is not None:
             st.markdown("---")
-            st.caption("请核对下方识别结果 (最右侧列可查看数据来源图片)：")
+            st.caption("请核对下方识别结果：")
             ed_ocr = st.data_editor(st.session_state['ocr_df'], num_rows="dynamic", use_container_width=True)
             if st.button("📥 确认合并到总表", type="primary", use_container_width=True):
                 new_master, _, changes_df = U.merge_ocr_to_master(st.session_state['m_df'], ed_ocr)
                 st.session_state['m_df'] = new_master
-                # 合并后重置计算状态，因为数据变了
                 st.session_state['has_calculated'] = False 
                 
                 anomalies = U.validate_data_ranges(new_master)
                 if not anomalies.empty:
-                    with st.expander("💡 数据核对提醒 (点击展开)", expanded=True):
-                        st.info("系统检测到部分数值较大或较小，建议扫视确认（如无误请忽略）：")
+                    with st.expander("💡 数据核对提醒", expanded=True):
+                        st.info("检测到部分数值异常，请确认：")
                         st.dataframe(anomalies, use_container_width=True)
                 
                 if not changes_df.empty:
-                    st.success(f"🎉 已成功更新 {len(changes_df)} 条数据！")
-                    with st.expander("查看详细变更记录 (含来源图片)"):
-                        st.dataframe(changes_df, use_container_width=True)
+                    st.success(f"🎉 已更新 {len(changes_df)} 条数据！")
+                    with st.expander("查看详细变更记录"): st.dataframe(changes_df, use_container_width=True)
                 else: st.warning("未检测到有效更新")
 
     # === Tab 2: 数据处理 ===
@@ -293,9 +312,8 @@ if st.session_state['m_df'] is not None:
             rs = sld.slider("粗调", 0.0, 100.0, key='target_rate_coarse', step=1.0, label_visibility="collapsed")
             tr = inp.number_input("精调", 0.0, 100.0, float(rs), 0.1, label_visibility="collapsed")
             
-            run_btn = st.button("⚡ 执行智能调整", type="primary", use_container_width=True)
+            run_btn = st.button("⚡ 执行智能清洗与调整", type="primary", use_container_width=True)
 
-        # 点击按钮时执行计算
         if run_btn:
             if not U.STANDARDS_DB: st.error("❌ 标准库丢失")
             else:
@@ -304,14 +322,13 @@ if st.session_state['m_df'] is not None:
                 df_f, boost_logs = U.auto_boost(df_c, tr, school_level)
                 achieved = U.calculate_good_rate(df_f, school_level)
                 
-                st.session_state['m_df'] = df_f # 更新主表
+                st.session_state['m_df'] = df_f
                 st.session_state['df_adjusted'] = df_f
                 st.session_state['boost_logs'] = boost_logs
                 st.session_state['achieved_rate'] = achieved
-                st.session_state['has_calculated'] = True # 标记已计算
-                st.session_state['ai_report'] = "" # 重置报告
+                st.session_state['has_calculated'] = True
+                st.session_state['ai_report'] = ""
 
-        # 只要计算过，就一直显示结果
         if st.session_state.get('has_calculated', False):
             st.write("")
             st.markdown("---")
@@ -332,11 +349,10 @@ if st.session_state['m_df'] is not None:
                 """, unsafe_allow_html=True)
             
             st.write("")
-            # 图表展示
             with st.expander("📊 数据分布可视化分析 (点击查看专业图表)", expanded=True):
                 chart_fig = render_distribution_chart(df_old, df_new)
                 if chart_fig: st.plotly_chart(chart_fig, use_container_width=True)
-                else: st.info("暂无足够数据生成对比图表 (请确保表格包含数值型体育项目)")
+                else: st.info("暂无足够数据生成图表")
 
             if not logs.empty:
                 with st.expander(f"📋 查看调整明细 ({len(logs)} 项)", expanded=False):
@@ -365,3 +381,10 @@ if st.session_state['m_df'] is not None:
             if ex_data:
                 c_dl.download_button("📥 下载 Excel", ex_data, f"77体测_{school_level}_最终.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
             else: st.error(msg)
+
+st.markdown("""
+<div class="footer">
+    77 SYSTEM &copy; 2024 | 全学段体育数据智能中枢<br>
+    <span style="opacity: 0.6;">隐私声明：本系统所有数据仅在内存中临时处理，绝不进行云端留存或用于训练，请放心使用。</span>
+</div>
+""", unsafe_allow_html=True)
