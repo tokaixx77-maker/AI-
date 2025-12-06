@@ -8,7 +8,7 @@ import utils as U
 import plotly.figure_factory as ff
 
 # ==========================================
-# 🎨 UI 配置 (V12.3 With Data Preview)
+# 🎨 UI 配置 (V12.4 Chart Persistence Fix)
 # ==========================================
 st.set_page_config(
     page_title="77 SYSTEM",
@@ -80,7 +80,7 @@ def render_ui_header():
 
     <div style="margin-bottom: 30px;">
         <h1 class='main-logo-text'>77 <span class='brand-blue'>SYSTEM</span></h1>
-        <p class='sub-title'>全学段体测数据智能中枢 // v12.3 Pro Toolkit</p>
+        <p class='sub-title'>全学段体测数据智能中枢 // v12.4 Stable Persistence</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -93,9 +93,11 @@ def render_ui_header():
 # 📈 绘图函数
 # ==========================================
 def render_distribution_chart(df_old, df_new):
+    """绘制调整前后的成绩分布对比图"""
     score_cols = [col for col in df_new.columns if any(k in col for k in U.SCORE_COLUMNS_MAP.keys())]
     if not score_cols: return None
     
+    # 这里的 selectbox 会导致页面刷新，但只要数据在 Session State 里，图表就能保持
     selected_col = st.selectbox("📊 选择要查看分布变化的项目：", score_cols)
     
     clean_old = pd.to_numeric(df_old[selected_col], errors='coerce').dropna()
@@ -125,11 +127,18 @@ def render_distribution_chart(df_old, df_new):
 try: BACKEND_API_KEY = st.secrets["DASHSCOPE_API_KEY"]
 except: BACKEND_API_KEY = None
 
+# 【V12.4 新增】初始化存储结果的变量
 if 'init' not in st.session_state:
     st.session_state.update({
         'init': True, 'm_file_bytes': None, 'm_name': '', 'm_df': None, 'ocr_df': None,
         'target_rate_coarse': 90.0, 'school_level_index': 0,
-        'report_ready': False, 'identified_cols': [], 'unidentified_cols': []
+        'report_ready': False, 'identified_cols': [], 'unidentified_cols': [],
+        # 以下是新增的结果持久化变量
+        'has_calculated': False,
+        'df_old_snapshot': None,
+        'df_adjusted': None,
+        'boost_logs': None,
+        'achieved_rate': 0.0
     })
 
 render_ui_header()
@@ -174,33 +183,27 @@ with st.expander("📂 第一步：上传模版总表 (Excel)", expanded=True):
             if not is_identified and col not in ['姓名', '性别', '班级', '学号']:
                 unidentified_cols.append(f"`{col}`")
         
-        # 更新状态
+        # 更新状态 (上传新文件时，重置计算结果)
         st.session_state.update({
             'm_df': df, 'm_file_bytes': mf.getvalue(), 'm_name': mf.name,
             'report_ready': True, 
             'identified_cols': identified_cols,
-            'unidentified_cols': unidentified_cols
+            'unidentified_cols': unidentified_cols,
+            'has_calculated': False # 重置计算状态
         })
         st.toast(f"✅ 已加载: {mf.name}")
 
-# 【V12.3 新增】数据预览 + 识别报告
 if st.session_state.get('report_ready', False):
     st.write("") 
     with st.expander("🔎 智能表头识别报告 & 数据预览 (点击展开/收起)", expanded=True):
-        # 1. 数据预览部分
         st.markdown("##### 📊 原始数据预览 (前 5 行)")
         st.dataframe(st.session_state['m_df'].head(5), use_container_width=True)
-        st.markdown("---") # 分割线
+        st.markdown("---")
         
-        # 2. 识别报告部分
-        st.markdown("##### 🧠 字段识别分析")
         i_cols = st.session_state['identified_cols']
         u_cols = st.session_state['unidentified_cols']
-        
-        if i_cols:
-             st.success(f"✅ 成功识别以下体育项目列：\n\n" + ", ".join(i_cols))
-        if u_cols:
-             st.info(f"ℹ️ 以下列未被识别为标准体育项目（将被忽略）：\n\n" + ", ".join(u_cols) + "\n\n💡 提示：如需识别，请在 Excel 中修改为标准名称（如“50米”）。")
+        if i_cols: st.success(f"✅ 成功识别以下体育项目列：\n\n" + ", ".join(i_cols))
+        if u_cols: st.info(f"ℹ️ 以下列未被识别为标准体育项目（将被忽略）：\n\n" + ", ".join(u_cols) + "\n\n💡 提示：如需识别，请在 Excel 中修改为标准名称（如“50米”）。")
 
 # 2. 核心功能区
 if st.session_state['m_df'] is not None:
@@ -255,6 +258,8 @@ if st.session_state['m_df'] is not None:
             if st.button("📥 确认合并到总表", type="primary", use_container_width=True):
                 new_master, _, changes_df = U.merge_ocr_to_master(st.session_state['m_df'], ed_ocr)
                 st.session_state['m_df'] = new_master
+                # 合并后重置计算状态，因为数据变了
+                st.session_state['has_calculated'] = False 
                 
                 anomalies = U.validate_data_ranges(new_master)
                 if not anomalies.empty:
@@ -268,8 +273,9 @@ if st.session_state['m_df'] is not None:
                         st.dataframe(changes_df, use_container_width=True)
                 else: st.warning("未检测到有效更新")
 
-    # === Tab 2: 数据处理 ===
+    # === Tab 2: 数据处理 (V12.4 修复刷新消失) ===
     with t2:
+        # 始终基于当前最新的 m_df 计算当前优良率
         current_rate = U.calculate_good_rate(st.session_state['m_df'], school_level)
         c_left, c_mid, c_right = st.columns([1, 2, 1])
 
@@ -299,37 +305,56 @@ if st.session_state['m_df'] is not None:
             
             run_btn = st.button("⚡ 执行智能调整", type="primary", use_container_width=True)
 
+        # 【核心修复】计算逻辑：点击按钮时执行计算，并将结果存入 Session State
         if run_btn:
             if not U.STANDARDS_DB: st.error("❌ 标准库丢失")
             else:
-                df_old_snapshot = st.session_state['m_df'].copy()
+                # 1. 存快照
+                st.session_state['df_old_snapshot'] = st.session_state['m_df'].copy()
                 
+                # 2. 计算
                 df_c, _ = U.smart_clean(st.session_state['m_df'], school_level)
                 df_f, boost_logs = U.auto_boost(df_c, tr, school_level)
-                st.session_state['m_df'] = df_f
-                achieved_rate = U.calculate_good_rate(df_f, school_level)
+                achieved = U.calculate_good_rate(df_f, school_level)
                 
-                st.write("")
-                st.markdown("---")
-                rc1, rc2, rc3 = st.columns([1, 2, 1])
-                with rc2:
-                    st.markdown(f"""
-                    <div class="metric-card-adaptive">
-                        <div class="metric-lbl">✨ 调整后实际优良率</div>
-                        <div class="metric-val">{achieved_rate:.1f}%</div>
-                        <div style="margin-top:8px; color:#28a745; font-weight:bold;">+{achieved_rate - current_rate:.1f}% 提升</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                st.write("")
-                with st.expander("📊 数据分布可视化分析 (点击查看专业图表)", expanded=True):
-                    chart_fig = render_distribution_chart(df_old_snapshot, df_f)
-                    if chart_fig: st.plotly_chart(chart_fig, use_container_width=True)
-                    else: st.info("暂无足够数据生成对比图表 (请确保表格包含数值型体育项目)")
+                # 3. 存结果到 Session State
+                st.session_state['m_df'] = df_f # 更新主表
+                st.session_state['df_adjusted'] = df_f
+                st.session_state['boost_logs'] = boost_logs
+                st.session_state['achieved_rate'] = achieved
+                st.session_state['has_calculated'] = True # 标记已计算
 
-                if not boost_logs.empty:
-                    with st.expander(f"📋 查看调整明细 ({len(boost_logs)} 项)", expanded=False):
-                        st.dataframe(boost_logs, use_container_width=True, hide_index=True)
+        # 【核心修复】显示逻辑：只要 has_calculated 为 True，就显示结果（哪怕按钮没被按）
+        if st.session_state.get('has_calculated', False):
+            st.write("")
+            st.markdown("---")
+            rc1, rc2, rc3 = st.columns([1, 2, 1])
+            
+            # 从 Session State 读取结果
+            achieved = st.session_state['achieved_rate']
+            df_old = st.session_state['df_old_snapshot']
+            df_new = st.session_state['df_adjusted']
+            logs = st.session_state['boost_logs']
+            
+            with rc2:
+                st.markdown(f"""
+                <div class="metric-card-adaptive">
+                    <div class="metric-lbl">✨ 调整后实际优良率</div>
+                    <div class="metric-val">{achieved:.1f}%</div>
+                    <div style="margin-top:8px; color:#28a745; font-weight:bold;">+{achieved - current_rate:.1f}% 提升</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.write("")
+            # 图表展示 (切换 Selectbox 会导致刷新，但因为 has_calculated 是 True，所以会重新进入这里渲染图表)
+            with st.expander("📊 数据分布可视化分析 (点击查看专业图表)", expanded=True):
+                chart_fig = render_distribution_chart(df_old, df_new)
+                if chart_fig: st.plotly_chart(chart_fig, use_container_width=True)
+                else: st.info("暂无足够数据生成对比图表 (请确保表格包含数值型体育项目)")
+
+            if not logs.empty:
+                with st.expander(f"📋 查看调整明细 ({len(logs)} 项)", expanded=False):
+                    st.dataframe(logs, use_container_width=True, hide_index=True)
 
         if st.session_state['m_df'] is not None and st.session_state['m_file_bytes']:
             st.write("")
