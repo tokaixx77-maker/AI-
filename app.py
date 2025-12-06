@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import utils as U
 
 # ==========================================
-# 🎨 UI 配置 (V11.1 Fix Display Issue)
+# 🎨 UI 配置 (V11.2 Chinese Title Edition)
 # ==========================================
 st.set_page_config(
     page_title="77 SYSTEM",
@@ -24,7 +24,7 @@ def render_ui_header():
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
     
     html, body, [class*="css"] {
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        font-family: 'Inter', system-ui, -apple-system, "Microsoft YaHei", sans-serif;
     }
 
     /* --- 卡片容器 --- */
@@ -52,9 +52,15 @@ def render_ui_header():
         line-height: 1.2;
     }
     .brand-blue { color: #0071e3; }
+    
+    /* 副标题样式优化：中文适配 */
     .sub-title {
-        font-size: 15px; opacity: 0.7; font-weight: 500; margin-top: 5px;
-        text-transform: uppercase; letter-spacing: 1px;
+        font-size: 16px; /* 稍微调大一点 */
+        opacity: 0.8;
+        font-weight: 500;
+        margin-top: 8px;
+        letter-spacing: 1px;
+        font-family: "Microsoft YaHei", sans-serif; /* 确保中文显示优雅 */
     }
 
     /* --- 按钮 --- */
@@ -101,7 +107,7 @@ def render_ui_header():
 
     <div style="margin-bottom: 30px;">
         <h1 class='main-logo-text'>77 <span class='brand-blue'>SYSTEM</span></h1>
-        <p class='sub-title'>Professional PE Data Intelligence</p>
+        <p class='sub-title'>全学段体测数据智能中枢 // v11.2 Professional</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -211,7 +217,7 @@ if st.session_state['m_df'] is not None:
                         st.dataframe(changes_df, use_container_width=True)
                 else: st.warning("未检测到有效更新")
 
-    # === Tab 2: 数据处理 (修复显示) ===
+    # === Tab 2: 数据处理 ===
     with t2:
         current_rate = U.calculate_good_rate(st.session_state['m_df'], school_level)
         c_left, c_mid, c_right = st.columns([1, 2, 1])
@@ -222,7 +228,6 @@ if st.session_state['m_df'] is not None:
             offset = circumference - (current_rate / 100 * circumference)
             
             # 圆环 SVG
-            # 修复：给文字容器增加了 z-index 和 explicit color，确保显示
             st.markdown(f"""
             <div class="progress-ring-container" style="position: relative; width: 180px; height: 180px; margin: 0 auto;">
                 <svg class="progress-ring" width="180" height="180">
@@ -239,7 +244,6 @@ if st.session_state['m_df'] is not None:
             """, unsafe_allow_html=True)
             
             st.write("")
-            # 修改文案为“设定目标优良率”
             st.markdown("##### 🎯 设定目标优良率")
             sld, inp = st.columns([3, 1])
             rs = sld.slider("粗调", 0.0, 100.0, key='target_rate_coarse', step=1.0, label_visibility="collapsed")
