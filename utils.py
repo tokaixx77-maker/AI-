@@ -14,11 +14,11 @@ try:
     import openpyxl
     import dashscope
 except ImportError:
-    st.error("❌ 严重错误：缺少运行必要的库。请确保服务器已安装: `dashscope`, `openpyxl`, `pandas`。")
+    st.error("❌ 严重错误：缺少运行必要的库。")
     st.stop()
 
 # ==========================================
-# 📚 核心配置与标准库管理
+# 📚 核心配置
 # ==========================================
 SCORE_COLUMNS_MAP = {
     '50米': ['50米', '50米跑', '五十米'],
@@ -46,7 +46,6 @@ DEFAULT_STANDARDS_DATA = {
 
 @st.cache_data(ttl=3600)
 def load_standards():
-    """加载标准库。"""
     file_path = 'standards.json'
     if not os.path.exists(file_path):
         try:
@@ -60,15 +59,13 @@ def load_standards():
 STANDARDS_DB = load_standards()
 
 # ==========================================
-# 🧠 核心算法: 计算与调整 (V7.2 真实感重构版)
+# 🧠 核心算法
 # ==========================================
 def calculate_good_rate(df, level):
-    """计算当前数据的优良率。"""
     if not STANDARDS_DB or level not in STANDARDS_DB: return 0.0
     std_male, std_female = STANDARDS_DB[level]["男"], STANDARDS_DB[level]["女"]
     total_items, total_good = 0, 0
     if len(df) == 0: return 0.0
-    
     for _, row in df.iterrows():
         gender = row.get('性别')
         current_std = std_male if str(gender) in ['1','1.0','男'] else std_female
@@ -85,24 +82,17 @@ def calculate_good_rate(df, level):
     return (total_good / total_items) * 100 if total_items > 0 else 0.0
 
 def auto_boost(df, target_rate, level):
-    """
-    【V7.2 重构核心算法】智能调整：优先微调离及格线最近的数据点。
-    """
     df_a = df.copy()
     boost_changes = []
-
-    if not STANDARDS_DB or level not in STANDARDS_DB:
-        return df_a, pd.DataFrame()
+    if not STANDARDS_DB or level not in STANDARDS_DB: return df_a, pd.DataFrame()
     
     std_male, std_female = STANDARDS_DB[level]["男"], STANDARDS_DB[level]["女"]
     not_good_candidates = [] 
     total_valid_items, current_good_items = 0, 0
     
-    # --- 第一步：扫描数据，计算差距，建立候选池 ---
     for idx, row in df_a.iterrows():
         gender = row.get('性别')
         current_std = std_male if str(gender) in ['1','1.0','男'] else std_female
-        
         for col in df_a.columns:
             key = next((k for k in current_std.keys() if k in col), None)
             if key and pd.notna(row[col]):
@@ -110,14 +100,10 @@ def auto_boost(df, target_rate, level):
                     val = float(row[col])
                     good_cutoff = float(current_std[key]['80'])
                     is_running = key in ['50米', '800米', '1000米', '50x8往返跑', '50米跑', '800米跑', '1000米跑']
-                    
                     is_good = (is_running and val <= good_cutoff) or (not is_running and val >= good_cutoff)
                     total_valid_items += 1
-                    
-                    if is_good:
-                        current_good_items += 1
+                    if is_good: current_good_items += 1
                     else:
-                        # 计算差距
                         distance = (val - good_cutoff) if is_running else (good_cutoff - val)
                         not_good_candidates.append({
                             'idx': idx, 'col': col, 'val': val,
@@ -127,34 +113,27 @@ def auto_boost(df, target_rate, level):
                 except: continue
                 
     if total_valid_items == 0: return df_a, pd.DataFrame()
-    
-    # --- 第二步：计算缺口并执行优先微调 ---
     target_good_count = int(total_valid_items * (target_rate / 100))
     needed = target_good_count - current_good_items
     
     with st.status(f"🚀 智能调整算法执行中... (目标: {target_rate}%)", expanded=True) as status:
-        # 【幂等性检查】
         if needed <= 0:
-            st.success("✅ 当前数据已达到或超过目标优良率，无需调整。")
+            st.success("✅ 已达标，无需调整。")
             time.sleep(0.5)
             status.update(state="complete", expanded=False)
             return df_a, pd.DataFrame()
         
-        st.write(f"⚡ 分析完毕，需要优化 {needed} 个数据点。正在优先筛选最接近目标的数据...")
-        
-        # 【关键步骤】按距离排序，优先处理差距最小的
+        st.write(f"⚡ 正在优先优化 {needed} 个最接近目标的数据点...")
         not_good_candidates.sort(key=lambda x: x['distance'])
         cells_to_boost = not_good_candidates[:needed]
-        
         prog = st.progress(0)
+        
         for i, cell in enumerate(cells_to_boost):
             row_idx, col_name = cell['idx'], cell['col']
             threshold, is_run = cell['threshold'], cell['is_running']
             old_val = df_a.at[row_idx, col_name]
-            # 【汉化】使用中文表头
             student_name = df_a.at[row_idx, '姓名'] if '姓名' in df_a.columns else f"行{row_idx+1}"
 
-            # 【关键步骤】生成真实感微调数据
             if is_run:
                 boost_amount = random.uniform(0.01, 0.2)
                 new_val = round(max(0.1, threshold - boost_amount), 2)
@@ -168,22 +147,17 @@ def auto_boost(df, target_rate, level):
                 new_val = round(threshold + random.uniform(0.1, 1.0), 1)
                 
             df_a.at[row_idx, col_name] = new_val
-            # 【汉化】记录日志使用中文 Key
             boost_changes.append({"姓名": student_name, "调整项目": col_name, "调整前(旧值)": old_val, "调整后(新值)": new_val})
-            
-            if i % (max(1, len(cells_to_boost)//10)) == 0:
-                prog.progress((i+1)/len(cells_to_boost))
-                
+            if i % (max(1, len(cells_to_boost)//10)) == 0: prog.progress((i+1)/len(cells_to_boost))
         prog.progress(100)
-        status.update(label=f"✅ 调整完毕！已精准优化 {len(cells_to_boost)} 个数据点。", state="complete", expanded=False)
+        status.update(label=f"✅ 调整完毕！", state="complete", expanded=False)
         
     return df_a, pd.DataFrame(boost_changes)
 
 # ==========================================
-# 🛠️ 工具函数: OCR/Excel/清洗/校验
+# 🛠️ 工具函数
 # ==========================================
 def save_data_keeping_format(orig_file_bytes_io, processed_df):
-    """无损导出 Excel"""
     try:
         wb = openpyxl.load_workbook(orig_file_bytes_io)
         ws = wb.active
@@ -206,7 +180,6 @@ def save_data_keeping_format(orig_file_bytes_io, processed_df):
     except Exception as e: return None, f"导出失败: {str(e)}"
 
 def call_qwen_vl_ocr(img_file, api_key):
-    """调用阿里云 AI 进行 OCR 识别"""
     dashscope.api_key = api_key
     prompt = "你是一个专业的体测数据录入员。请分析这张体测成绩单图片。任务：提取表格中的姓名、性别、班级，以及所有体育项目的成绩。重要规则：1. **姓名必须极其准确**，这是匹配的关键。2. 如果有“立定跳远”项目，且单位是“米”（例如 2.3），请务必转换为“厘米”（例如 230）。3. 最终输出必须是一个纯粹的 JSON 格式列表（List of Dicts），不要包含任何Markdown标记（如 ```json ... ```）或其他解释文字。例如：[{\"姓名\": \"张三\", \"性别\": \"男\", \"50米\": \"7.5\", \"立定跳远\": \"230\"}, ...]"
     local_path = None
@@ -222,10 +195,9 @@ def call_qwen_vl_ocr(img_file, api_key):
         else: return f"Error: API 返回状态码 {resp.code} - {resp.message}"
     except Exception as e:
         if local_path and os.path.exists(local_path): os.remove(local_path)
-        return f"API 调用异常: {str(e)}"
+        return f"Error: {str(e)}"
 
 def merge_ocr_to_master(master_df, ocr_df):
-    """合并 OCR 结果到主表"""
     merged_df = master_df.copy()
     logs, changes = [], []
     ocr_cols = ocr_df.columns
@@ -247,13 +219,11 @@ def merge_ocr_to_master(master_df, ocr_df):
                         old_val = merged_df.at[target_idx, col]
                         merged_df.at[target_idx, col] = row[col]
                         updated_items.append(col)
-                        # 【汉化】记录合并日志
                         changes.append({"姓名": name, "项目": col, "旧值": old_val if pd.notna(old_val) else "(空)", "新值": row[col]})
                 if updated_items: logs.append(f"✅ {name}: 成功更新 {len(updated_items)} 个项目")
     return merged_df, logs, pd.DataFrame(changes)
 
 def smart_clean(df, level):
-    """智能清洗：清除性别不符的项目数据"""
     df_c = df.copy()
     with st.spinner("🧹 正在根据学段和性别清洗无关数据..."):
         for i, row in df_c.iterrows():
@@ -268,7 +238,6 @@ def smart_clean(df, level):
     return df_c, []
 
 def validate_data_ranges(df):
-    """数据合理性校验"""
     anomalies = []
     bounds = {
         '50米': (5.0, 25.0), '50米跑': (5.0, 25.0), '800米': (100, 600), '800米跑': (100, 600),
@@ -276,7 +245,6 @@ def validate_data_ranges(df):
         '身高': (80, 250), '体重': (15, 200), '肺活量': (300, 10000)
     }
     for idx, row in df.iterrows():
-        # 【汉化】
         name = row.get('姓名', f'行{idx+1}')
         for col, val in row.items():
             if col in bounds and pd.notna(val):
@@ -284,7 +252,6 @@ def validate_data_ranges(df):
                     v = float(val)
                     lower, upper = bounds[col]
                     if not (lower <= v <= upper):
-                        # 【汉化】异常记录
                         anomalies.append({"姓名": name, "项目": col, "异常值": v, "异常原因": f"超出合理范围 {lower}-{upper}"})
                 except:
                     anomalies.append({"姓名": name, "项目": col, "异常值": str(val), "异常原因": "格式错误(非数字)"})
